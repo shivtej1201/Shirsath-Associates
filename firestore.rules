@@ -1,0 +1,113 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: leads
+    // Document ID: auto-generated
+    // Fields:
+    //   - name: string (required, 1-100 chars)
+    //   - email: string (required, email format)
+    //   - phone: string (required, 5-20 chars)
+    //   - legalIssue: string (required, 1-2000 chars)
+    //   - status: string (required, enum: ['new', 'contacted', 'closed'])
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: users
+    // Document ID: userId (auth.uid)
+    // Fields:
+    //   - uid: string (required, matches doc ID)
+    //   - email: string (required, email format)
+    //   - role: string (required, enum: ['admin', 'staff'])
+    //
+    // Collection: callbacks
+    // Document ID: auto-generated
+    // Fields:
+    //   - phone: string (required, 5-20 chars)
+    //   - status: string (required, enum: ['new', 'contacted', 'closed'])
+    //   - createdAt: timestamp (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+        (request.auth.token.email == "shivatejsonawane3149@gmail.com" && request.auth.token.email_verified == true)
+      );
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidLead(data) {
+      return data.keys().hasAll(['name', 'email', 'phone', 'legalIssue', 'status', 'createdAt']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             isValidEmail(data.email) &&
+             data.phone is string && data.phone.size() >= 5 && data.phone.size() <= 20 &&
+             data.legalIssue is string && data.legalIssue.size() > 0 && data.legalIssue.size() <= 2000 &&
+             data.status in ['new', 'contacted', 'closed'] &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'role']) &&
+             data.uid == request.auth.uid &&
+             isValidEmail(data.email) &&
+             data.role in ['admin', 'staff'];
+    }
+
+    function isValidCallback(data) {
+      return data.keys().hasAll(['phone', 'status', 'createdAt']) &&
+             data.phone is string && data.phone.size() >= 5 && data.phone.size() <= 20 &&
+             data.status in ['new', 'contacted', 'closed'] &&
+             data.createdAt is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /callbacks/{callbackId} {
+      // Anyone can create a callback request
+      allow create: if isValidCallback(request.resource.data);
+      
+      // Only admins can read or update callbacks
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /leads/{leadId} {
+      // Anyone can create a lead (public submission)
+      allow create: if isValidLead(request.resource.data);
+      
+      // Only admins can read or update leads
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /users/{userId} {
+      // Users can read their own profile
+      allow read: if isOwner(userId) || isAdmin();
+      
+      // Only admins can create/update user roles
+      allow create, update: if isAdmin() && isValidUser(request.resource.data);
+    }
+
+    // Default deny
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}
